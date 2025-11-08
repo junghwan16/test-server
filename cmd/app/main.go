@@ -1,16 +1,14 @@
 package main
 
 import (
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
-	"time"
 
-	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
+	"github.com/junghwan16/test-server/internal/config"
 	"github.com/junghwan16/test-server/internal/health"
 	"github.com/junghwan16/test-server/internal/server"
 
@@ -20,23 +18,17 @@ import (
 )
 
 func main() {
-	// Load .env file first
-	_ = godotenv.Load()
-
-	logger := initLogger()
-
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		logger.Error("JWT_SECRET environment variable is required")
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("failed to load configuration", "error", err)
 		os.Exit(1)
 	}
 
-	serverPort := getEnv("SERVER_PORT", "8080")
-	sessionExpiry := 1 * time.Hour
+	logger := initLogger(&cfg.Logger)
+	logger.Info("starting application", "port", cfg.Server.Port)
 
-	logger.Info("starting application", "port", serverPort)
-
-	db, err := initDB(logger)
+	db, err := initDB(&cfg.Database, logger)
 	if err != nil {
 		logger.Error("failed to initialize database", "error", err)
 		os.Exit(1)
@@ -55,24 +47,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	authAppService := auth_app.NewAuthService(userRepository, logger, sessionExpiry)
+	authAppService := auth_app.NewAuthService(userRepository, logger, cfg.Auth.SessionExpiry)
 	userAppService := auth_app.NewUserService(userRepository, logger)
 
-	// Setup health checks
-	healthService := health.NewService(db, logger)
-	healthHandler := health.NewHandler(healthService)
+	srv := server.New(logger)
 
-	// Create server with health handler
-	srv := server.New(logger, healthHandler)
+	// [HEALTH]
+	healthHandler := health.NewHandler(db, logger)
+	srv.Router().HandleFunc("GET /health/live", healthHandler.Live)
+	srv.Router().HandleFunc("GET /health/ready", healthHandler.Ready)
 
-	// Mark application as ready after all initialization
-	healthService.MarkReady()
-
-	jwtEncoder := auth_http.NewJWTEncoder(jwtSecret)
-
+	// [AUTH]
+	jwtEncoder := auth_http.NewJWTEncoder(cfg.Auth.JWTSecret)
 	auth_http.RegisterRoutes(srv.Router(), authAppService, userAppService, jwtEncoder, logger)
 
-	addr := ":" + serverPort
+	addr := ":" + cfg.Server.Port
 	logger.Info("server listening", "address", addr)
 
 	if err := http.ListenAndServe(addr, srv); err != nil {
@@ -81,24 +70,8 @@ func main() {
 	}
 }
 
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-func initDB(logger *slog.Logger) (*gorm.DB, error) {
-	host := getEnv("DB_HOST", "localhost")
-	user := getEnv("DB_USER", "postgres")
-	password := getEnv("DB_PASSWORD", "")
-	dbname := getEnv("DB_NAME", "postgres")
-	port := getEnv("DB_PORT", "5432")
-
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
-		host, user, password, dbname, port)
-
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+func initDB(cfg *config.DatabaseConfig, logger *slog.Logger) (*gorm.DB, error) {
+	db, err := gorm.Open(postgres.Open(cfg.DSN()), &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}
@@ -108,19 +81,18 @@ func initDB(logger *slog.Logger) (*gorm.DB, error) {
 		return nil, err
 	}
 
-	sqlDB.SetMaxOpenConns(25)
-	sqlDB.SetMaxIdleConns(5)
-	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
+	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
+	sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
 
 	logger.Info("database connected", "driver", "postgres")
 	return db, nil
 }
 
-func initLogger() *slog.Logger {
-	env := getEnv("ENV", "development")
-
+// TODO: zap logger가 더 효율적이라면 변경을 고려.
+func initLogger(cfg *config.LoggerConfig) *slog.Logger {
 	var handler slog.Handler
-	if env == "production" {
+	if cfg.IsProduction() {
 		// Production: JSON format
 		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 			Level: slog.LevelInfo,

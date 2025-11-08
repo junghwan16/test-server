@@ -1,37 +1,48 @@
 package health
 
 import (
-	"encoding/json"
+	"context"
+	"log/slog"
 	"net/http"
+	"time"
+
+	"gorm.io/gorm"
 )
 
-// Handler는 헬스체크 HTTP 엔드포인트를 처리합니다.
 type Handler struct {
-	service *Service
+	db     *gorm.DB
+	logger *slog.Logger
 }
 
-// NewHandler는 새로운 헬스체크 핸들러를 생성합니다.
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(db *gorm.DB, logger *slog.Logger) *Handler {
+	return &Handler{
+		db:     db,
+		logger: logger,
+	}
 }
 
-// HandleLiveness는 liveness probe 엔드포인트를 처리합니다.
-func (h *Handler) HandleLiveness(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+func (h *Handler) Live(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	w.Write([]byte("OK"))
 }
 
-// HandleReadiness는 readiness probe 엔드포인트를 처리합니다.
-func (h *Handler) HandleReadiness(w http.ResponseWriter, r *http.Request) {
-	if h.service.CheckReadiness(r.Context()) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	sqlDB, err := h.db.DB()
+	if err != nil {
+		h.logger.Error("health check: failed to get db instance", "error", err)
+		w.WriteHeader(http.StatusServiceUnavailable)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusServiceUnavailable)
-	json.NewEncoder(w).Encode(map[string]string{"status": "unavailable"})
+	if err := sqlDB.PingContext(ctx); err != nil {
+		h.logger.Warn("health check: database not ready", "error", err)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
 }
