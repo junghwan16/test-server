@@ -2,9 +2,8 @@
 FROM golang:1.25-bookworm AS build
 WORKDIR /src
 COPY . .
-# buildx가 TARGETOS/TARGETARCH를 주입한다
 ARG TARGETOS TARGETARCH
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/app main.go
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/app ./cmd/app
 
 FROM gcr.io/distroless/static:nonroot
 COPY --from=build /out/app /app
