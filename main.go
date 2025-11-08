@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"net/http"
 	"sync/atomic"
-
-	"rsc.io/quote"
+	"time"
 )
 
 var (
@@ -19,7 +19,8 @@ func main() {
 	http.HandleFunc("/ready", handleReady)
 	http.HandleFunc("/live", handleLive)
 
-	http.HandleFunc("/quote", handleQuote)
+	// Hello API
+	http.HandleFunc("/hello", handleHello)
 
 	// 응용 1: startupProbe 실패 유발
 	http.HandleFunc("/startup-fail-on", func(w http.ResponseWriter, r *http.Request) {
@@ -34,6 +35,25 @@ func main() {
 	addr := ":8080"
 	fmt.Println("Starting server on", addr)
 	http.ListenAndServe(addr, nil)
+}
+
+func handleHello(w http.ResponseWriter, r *http.Request) {
+	greetings := []string{
+		"Hello, World!",
+		"Live long and prosper.",
+		"May the Force be with you.",
+		"So long, and thanks for all the fish.",
+		"Never give up, never surrender!",
+		"Go forth, and multiply.",
+		"To infinity, and beyond!",
+		"Excelsior!",
+	}
+
+	rand.Seed(time.Now().UnixNano())
+	greeting := greetings[rand.Intn(len(greetings))]
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintln(w, greeting)
 }
 
 // 앱 초기화 체크
@@ -66,10 +86,6 @@ func handleLive(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintln(w, "live=true")
-}
-
-func handleQuote(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, quote.Go())
 }
 
 // 부하 증가
