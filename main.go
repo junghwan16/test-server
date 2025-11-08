@@ -6,18 +6,25 @@ import (
 	"os"
 	"sync/atomic"
 	"time"
+
+	"rsc.io/quote"
 )
 
 var (
 	isReady int32 = 1
 	isLive  int32 = 1
 	start         = time.Now()
+
+	// 메모리 누수를 시뮬레이션하기 위한 전역 변수
+	leakyData [][]byte
 )
 
 func main() {
 	http.HandleFunc("/startup", handleStartup)
 	http.HandleFunc("/ready", handleReady)
 	http.HandleFunc("/live", handleLive)
+
+	http.HandleFunc("/quote", handleQuote)
 	http.HandleFunc("/memleak", handleMemoryLeak)
 
 	addr := ":8080"
@@ -67,7 +74,9 @@ func handleLive(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "live=true")
 }
 
-var leakyData [][]byte
+func handleQuote(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintln(w, quote.Go())
+}
 
 func handleMemoryLeak(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "Starting to leak memory...")
