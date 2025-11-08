@@ -18,9 +18,7 @@ func main() {
 	http.HandleFunc("/startup", handleStartup)
 	http.HandleFunc("/ready", handleReady)
 	http.HandleFunc("/live", handleLive)
-
-	http.HandleFunc("/server-load-on", handleLoadOn)
-	http.HandleFunc("/server-load-off", handleLoadOff)
+	http.HandleFunc("/memleak", handleMemoryLeak)
 
 	addr := ":8080"
 	fmt.Println("Starting server on", addr)
@@ -69,23 +67,16 @@ func handleLive(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "live=true")
 }
 
-// 가상의 부하 상태를 가정
-// isReady, isLive 를 랜덤으로 변경
-func handleLoadOn(w http.ResponseWriter, r *http.Request) {
-	// 30초 뒤 ready=false, 3분 뒤 live=false
-	go func() {
-		time.Sleep(30 * time.Second)
-		atomic.StoreInt32(&isReady, 0)
-	}()
-	go func() {
-		time.Sleep(3 * time.Minute)
-		atomic.StoreInt32(&isLive, 0)
-	}()
-	fmt.Fprintln(w, "load-on: ready->false@30s, live->false@180s")
-}
+var leakyData [][]byte
 
-func handleLoadOff(w http.ResponseWriter, r *http.Request) {
-	atomic.StoreInt32(&isReady, 1)
-	atomic.StoreInt32(&isLive, 1)
-	fmt.Fprintln(w, "load-off: ready/live restored")
+func handleMemoryLeak(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintln(w, "Starting to leak memory...")
+	go func() {
+		for {
+			// 1MB씩 할당
+			data := make([]byte, 1024*1024)
+			leakyData = append(leakyData, data)
+			time.Sleep(1 * time.Second)
+		}
+	}()
 }
