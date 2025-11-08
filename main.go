@@ -3,20 +3,15 @@ package main
 import (
 	"fmt"
 	"net/http"
-	"os"
 	"sync/atomic"
-	"time"
 
 	"rsc.io/quote"
 )
 
 var (
-	isReady int32 = 1
-	isLive  int32 = 1
-	start         = time.Now()
-
-	// 메모리 누수를 시뮬레이션하기 위한 전역 변수
-	leakyData [][]byte
+	isReady     int32 = 1
+	isLive      int32 = 1
+	isStartupOk int32 = 1
 )
 
 func main() {
@@ -25,7 +20,16 @@ func main() {
 	http.HandleFunc("/live", handleLive)
 
 	http.HandleFunc("/quote", handleQuote)
-	http.HandleFunc("/memleak", handleMemoryLeak)
+
+	// 응용 1: startupProbe 실패 유발
+	http.HandleFunc("/startup-fail-on", func(w http.ResponseWriter, r *http.Request) {
+		atomic.StoreInt32(&isStartupOk, 0)
+		fmt.Fprintln(w, "Set to fail startupProbe. The pod will restart indefinitely if a startupProbe is configured.")
+	})
+
+	// 응용 2: 부하 ON/OFF 및 관련 API
+	http.HandleFunc("/server-load-on", handleServerLoadOn)
+	http.HandleFunc("/server-load-off", handleServerLoadOff)
 
 	addr := ":8080"
 	fmt.Println("Starting server on", addr)
@@ -34,20 +38,10 @@ func main() {
 
 // 앱 초기화 체크
 func handleStartup(w http.ResponseWriter, r *http.Request) {
-	// startupProbe 실패 강제
-	if os.Getenv("STARTUP_ALWAYS_FAIL") == "true" {
-		http.Error(w, "startup failing (forced)", http.StatusInternalServerError)
+	// startupProbe 실패 강제 (응용 1)
+	if atomic.LoadInt32(&isStartupOk) == 0 {
+		http.Error(w, "startup failing (forced by /startup-fail-on)", http.StatusInternalServerError)
 		return
-	}
-
-	// 선택적 지연 (STARTUP_DELAY_SECONDS)
-	if d := os.Getenv("STARTUP_DELAY_SECONDS"); d != "" {
-		var delay int
-		fmt.Sscanf(d, "%d", &delay)
-		if time.Since(start) < time.Duration(delay)*time.Second {
-			http.Error(w, "starting up", http.StatusServiceUnavailable)
-			return
-		}
 	}
 
 	w.WriteHeader(http.StatusOK)
@@ -78,14 +72,18 @@ func handleQuote(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, quote.Go())
 }
 
-func handleMemoryLeak(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, "Starting to leak memory...")
-	go func() {
-		for {
-			// 1MB씩 할당
-			data := make([]byte, 1024*1024)
-			leakyData = append(leakyData, data)
-			time.Sleep(1 * time.Second)
-		}
-	}()
+// 부하 증가
+func handleServerLoadOn(w http.ResponseWriter, r *http.Request) {
+	atomic.StoreInt32(&isReady, 0)
+	atomic.StoreInt32(&isLive, 0)
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintln(w, "Server load ON. isReady=false, isLive=false. With proper probe settings, traffic will be stopped soon and the app will restart later.")
+}
+
+// 부하 감소
+func handleServerLoadOff(w http.ResponseWriter, r *http.Request) {
+	atomic.StoreInt32(&isReady, 1)
+	atomic.StoreInt32(&isLive, 1)
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintln(w, "Server load OFF. isReady=true, isLive=true")
 }
