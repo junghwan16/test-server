@@ -9,7 +9,7 @@ Go-based HTTP server implementing a user identity and authentication system foll
 ## Build and Run Commands
 
 ```bash
-# Start PostgreSQL database for development
+# Start PostgreSQL and Redis for development
 docker-compose -f docker-compose.dev.yml up -d
 
 # Run the server locally
@@ -50,9 +50,11 @@ The codebase follows DDD with Clean Architecture, organized into bounded context
   - `UserService`: User registration and management
   - `VerificationService`: Email verification and password reset flows
 
-- **Infrastructure Layer** (`infrastructure/persistence/`): Data persistence with GORM
+- **Infrastructure Layer** (`infrastructure/persistence/`): Data persistence
+  - User, email verification, and password reset repositories use GORM with PostgreSQL
+  - Session repository uses Redis for better performance and automatic expiration
   - Repositories implement domain repository interfaces
-  - Maps between domain aggregates and GORM models
+  - Maps between domain aggregates and persistence models
   - Publishes domain events after persistence
 
 - **Handler Layer** (`handler/`): HTTP handlers and DTOs
@@ -92,25 +94,28 @@ Events are collected on aggregates and published after successful persistence:
 3. Events are cleared from aggregate after publishing
 
 ### Repository Pattern
-Domain repositories are interfaces in the domain layer (`internal/identity/domain/user/repository.go`), implemented in infrastructure layer using GORM.
+Domain repositories are interfaces in the domain layer, implemented in infrastructure layer:
+- User, verification repositories: GORM with PostgreSQL
+- Session repository: Redis with TTL-based expiration
 
 ### Value Objects
 Email, Password, Role, UserID are immutable value objects with validation in constructors. Password uses bcrypt hashing.
 
 ### Session Management
-- Cookie-based sessions stored in database
-- Hourly cleanup of expired sessions (goroutine in `cmd/server/main.go:99-107`)
-- Session TTL configured via `SESSION_TTL` environment variable
+- Cookie-based sessions stored in Redis
+- Automatic expiration using Redis TTL (no cleanup goroutine needed)
+- Session TTL configured via `SESSION_TTL` environment variable (default: 86400 seconds)
+- Session data serialized as JSON with user ID, expiration, and creation timestamps
 
 ## Entry Point
 
 `cmd/server/main.go` is the application entry point. It:
 1. Loads configuration from environment variables
-2. Connects to PostgreSQL and runs auto-migrations
-3. Wires up dependencies (repositories, services, handlers)
-4. Sets up HTTP routes with middleware chain
-5. Starts background goroutines (session cleanup)
-6. Implements graceful shutdown
+2. Connects to PostgreSQL and Redis
+3. Runs auto-migrations for user, email verification, and password reset tables
+4. Wires up dependencies (repositories, services, handlers)
+5. Sets up HTTP routes with middleware chain
+6. Implements graceful shutdown for both database and Redis connections
 
 ## Testing
 
@@ -123,9 +128,10 @@ Tests are located alongside source files with `_test.go` suffix:
 
 Required variables (see `.env.example`):
 - `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `DB_PORT`: PostgreSQL connection
-- `JWT_SECRET`: Used for session signing (note: currently configured but sessions use simple string tokens)
+- `REDIS_HOST`, `REDIS_PORT`: Redis connection
 
 Optional variables:
+- `REDIS_PASSWORD`, `REDIS_DB`: Redis authentication and database selection
 - `SERVER_PORT` (default: 8080)
 - `ENV` (development/production, affects logging format)
 - `SESSION_TTL` (default: 86400 seconds = 24 hours)
@@ -160,8 +166,10 @@ Health checks:
 ## Important Implementation Details
 
 - User passwords are hashed with bcrypt (cost factor 12) in `internal/identity/domain/user/password.go`
-- Sessions are validated per request by checking cookie and database
+- Sessions stored in Redis with automatic TTL-based expiration
+- Sessions are validated per request by checking cookie and Redis
 - Rate limiting is per-IP with in-memory storage (resets on server restart)
 - Domain events currently use synchronous in-memory bus
 - GORM auto-generates user IDs (compromise noted in `user_repository.go:56-58`)
 - Middleware chain order: Logging → RateLimit → Auth (per route)
+- Redis session keys use pattern `session:{session_id}`

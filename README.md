@@ -9,7 +9,7 @@
 
 ### Quick Start
 
-1. **Start PostgreSQL**
+1. **Start PostgreSQL and Redis**
 
    ```bash
    docker-compose -f docker-compose.dev.yml up -d
@@ -19,13 +19,13 @@
 
    ```bash
    cp .env.example .env
-   # Edit .env and set JWT_SECRET
+   # Edit .env if needed
    ```
 
 3. **Run Application**
 
    ```bash
-   go run ./cmd/app
+   go run ./cmd/server
    ```
 
 4. **Test**
@@ -51,9 +51,15 @@ Required:
 - `DB_PASSWORD`: PostgreSQL password
 - `DB_NAME`: Database name (default: `postgres`)
 - `DB_PORT`: PostgreSQL port (default: `5432`)
-- `JWT_SECRET`: JWT signing key
+- `REDIS_HOST`: Redis host (default: `localhost`)
+- `REDIS_PORT`: Redis port (default: `6379`)
 
 Optional:
 
+- `REDIS_PASSWORD`: Redis password (default: empty)
+- `REDIS_DB`: Redis database number (default: `0`)
 - `SERVER_PORT`: Server port (default: `8080`)
 - `ENV`: Environment mode - `development` or `production`
+- `SESSION_TTL`: Session TTL in seconds (default: `86400`)
+- `RATE_LIMIT_RPS`: Rate limit requests per second (default: `10`)
+- `RATE_LIMIT_BURST`: Rate limit burst size (default: `20`)

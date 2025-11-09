@@ -10,6 +10,7 @@ import (
 type Config struct {
 	Server    ServerConfig
 	Database  DatabaseConfig
+	Redis     RedisConfig
 	Logger    LoggerConfig
 	SMTP      SMTPConfig
 	Session   SessionConfig
@@ -26,6 +27,13 @@ type DatabaseConfig struct {
 	Password string
 	Name     string
 	Port     string
+}
+
+type RedisConfig struct {
+	Host     string
+	Port     string
+	Password string
+	DB       int
 }
 
 type LoggerConfig struct {
@@ -63,6 +71,12 @@ func Load() (*Config, error) {
 			Password: getEnv("DB_PASSWORD", ""),
 			Name:     getEnv("DB_NAME", "postgres"),
 			Port:     getEnv("DB_PORT", "5432"),
+		},
+		Redis: RedisConfig{
+			Host:     getEnv("REDIS_HOST", "localhost"),
+			Port:     getEnv("REDIS_PORT", "6379"),
+			Password: getEnv("REDIS_PASSWORD", ""),
+			DB:       getEnvInt("REDIS_DB", 0),
 		},
 		Logger: LoggerConfig{
 			Environment: getEnv("ENV", "development"),
@@ -127,4 +141,9 @@ func (d *DatabaseConfig) DSN() string {
 // IsProduction returns true if the environment is production
 func (l *LoggerConfig) IsProduction() bool {
 	return l.Environment == "production"
+}
+
+// Addr returns the Redis connection address
+func (r *RedisConfig) Addr() string {
+	return r.Host + ":" + r.Port
 }

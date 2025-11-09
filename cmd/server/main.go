@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
@@ -37,7 +38,6 @@ func main() {
 
 	if err := db.AutoMigrate(
 		&persistence.UserModel{},
-		&persistence.SessionModel{},
 		&persistence.EmailVerificationModel{},
 		&persistence.PasswordResetModel{},
 	); err != nil {
@@ -46,10 +46,16 @@ func main() {
 	}
 	logger.Info("database migrated")
 
+	rdb, err := connectRedis(cfg, logger)
+	if err != nil {
+		logger.Error("failed to connect redis", "error", err)
+		os.Exit(1)
+	}
+
 	eventBus := domain.NewSimpleEventBus()
 
 	userRepo := persistence.NewUserRepository(db, eventBus)
-	sessionRepo := persistence.NewSessionRepository(db)
+	sessionRepo := persistence.NewRedisSessionRepository(rdb)
 	emailVerifRepo := persistence.NewEmailVerificationRepository(db)
 	passwordResetRepo := persistence.NewPasswordResetRepository(db)
 
@@ -97,16 +103,6 @@ func main() {
 	}
 
 	go func() {
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			if err := sessionRepo.DeleteExpired(); err != nil {
-				logger.Error("failed to delete expired sessions", "error", err)
-			}
-		}
-	}()
-
-	go func() {
 		logger.Info("server listening", "address", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("server failed", "error", err)
@@ -129,6 +125,11 @@ func main() {
 	if sqlDB, _ := db.DB(); sqlDB != nil {
 		logger.Info("closing database")
 		sqlDB.Close()
+	}
+
+	if rdb != nil {
+		logger.Info("closing redis")
+		rdb.Close()
 	}
 
 	logger.Info("shutdown complete")
@@ -161,4 +162,22 @@ func connectDB(cfg *config.Config, logger *slog.Logger) (*gorm.DB, error) {
 
 	logger.Info("database connected")
 	return db, nil
+}
+
+func connectRedis(cfg *config.Config, logger *slog.Logger) (*redis.Client, error) {
+	client := redis.NewClient(&redis.Options{
+		Addr:     cfg.Redis.Addr(),
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := client.Ping(ctx).Err(); err != nil {
+		return nil, err
+	}
+
+	logger.Info("redis connected")
+	return client, nil
 }
