@@ -1,7 +1,9 @@
 # Binaries
 /app
+/server
 /bin/
 cmd/app/app
+cmd/server/server
 *.exe
 *.exe~
 *.dll

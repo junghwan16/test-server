@@ -3,17 +3,17 @@ package config
 import (
 	"fmt"
 	"os"
-	"strconv"
-	"time"
 
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	Server   ServerConfig
-	Database DatabaseConfig
-	Auth     AuthConfig
-	Logger   LoggerConfig
+	Server    ServerConfig
+	Database  DatabaseConfig
+	Logger    LoggerConfig
+	SMTP      SMTPConfig
+	Session   SessionConfig
+	RateLimit RateLimitConfig
 }
 
 type ServerConfig struct {
@@ -26,24 +26,31 @@ type DatabaseConfig struct {
 	Password string
 	Name     string
 	Port     string
-	// Connection pool settings
-	MaxOpenConns    int
-	MaxIdleConns    int
-	ConnMaxLifetime time.Duration
-}
-
-type AuthConfig struct {
-	JWTSecret     string
-	SessionExpiry time.Duration
 }
 
 type LoggerConfig struct {
 	Environment string
 }
 
+type SMTPConfig struct {
+	Host     string
+	Port     string
+	Username string
+	Password string
+	From     string
+}
+
+type SessionConfig struct {
+	TTL int // seconds
+}
+
+type RateLimitConfig struct {
+	RequestsPerSecond float64
+	Burst             int
+}
+
 // Load loads the configuration from environment variables
 func Load() (*Config, error) {
-	// Load .env file if it exists (ignore error if file doesn't exist)
 	_ = godotenv.Load()
 
 	cfg := &Config{
@@ -51,38 +58,32 @@ func Load() (*Config, error) {
 			Port: getEnv("SERVER_PORT", "8080"),
 		},
 		Database: DatabaseConfig{
-			Host:            getEnv("DB_HOST", "localhost"),
-			User:            getEnv("DB_USER", "postgres"),
-			Password:        getEnv("DB_PASSWORD", ""),
-			Name:            getEnv("DB_NAME", "postgres"),
-			Port:            getEnv("DB_PORT", "5432"),
-			MaxOpenConns:    getEnvAsInt("DB_MAX_OPEN_CONNS", 25),
-			MaxIdleConns:    getEnvAsInt("DB_MAX_IDLE_CONNS", 5),
-			ConnMaxLifetime: getEnvAsDuration("DB_CONN_MAX_LIFETIME", 5*time.Minute),
-		},
-		Auth: AuthConfig{
-			JWTSecret:     os.Getenv("JWT_SECRET"),
-			SessionExpiry: getEnvAsDuration("SESSION_EXPIRY", 1*time.Hour),
+			Host:     getEnv("DB_HOST", "localhost"),
+			User:     getEnv("DB_USER", "postgres"),
+			Password: getEnv("DB_PASSWORD", ""),
+			Name:     getEnv("DB_NAME", "postgres"),
+			Port:     getEnv("DB_PORT", "5432"),
 		},
 		Logger: LoggerConfig{
 			Environment: getEnv("ENV", "development"),
 		},
-	}
-
-	// Validate required fields
-	if err := cfg.validate(); err != nil {
-		return nil, err
+		SMTP: SMTPConfig{
+			Host:     getEnv("SMTP_HOST", "localhost"),
+			Port:     getEnv("SMTP_PORT", "1025"),
+			Username: getEnv("SMTP_USERNAME", ""),
+			Password: getEnv("SMTP_PASSWORD", ""),
+			From:     getEnv("SMTP_FROM", "noreply@example.com"),
+		},
+		Session: SessionConfig{
+			TTL: getEnvInt("SESSION_TTL", 86400), // 24 hours
+		},
+		RateLimit: RateLimitConfig{
+			RequestsPerSecond: getEnvFloat("RATE_LIMIT_RPS", 10),
+			Burst:             getEnvInt("RATE_LIMIT_BURST", 20),
+		},
 	}
 
 	return cfg, nil
-}
-
-// validate checks if all required configuration fields are set
-func (c *Config) validate() error {
-	if c.Auth.JWTSecret == "" {
-		return fmt.Errorf("JWT_SECRET environment variable is required")
-	}
-	return nil
 }
 
 // getEnv gets an environment variable with a default value
@@ -93,31 +94,28 @@ func getEnv(key, defaultValue string) string {
 	return defaultValue
 }
 
-// getEnvAsInt gets an environment variable as an integer with a default value
-func getEnvAsInt(key string, defaultValue int) int {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
+// getEnvInt gets an environment variable as int with a default value
+func getEnvInt(key string, defaultValue int) int {
+	if value := os.Getenv(key); value != "" {
+		if intVal, err := fmt.Sscanf(value, "%d", new(int)); err == nil && intVal == 1 {
+			var result int
+			fmt.Sscanf(value, "%d", &result)
+			return result
+		}
 	}
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-	return value
+	return defaultValue
 }
 
-// getEnvAsDuration gets an environment variable as a duration with a default value
-// The environment variable should be in the format accepted by time.ParseDuration (e.g., "1h", "30m")
-func getEnvAsDuration(key string, defaultValue time.Duration) time.Duration {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
+// getEnvFloat gets an environment variable as float64 with a default value
+func getEnvFloat(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		if floatVal, err := fmt.Sscanf(value, "%f", new(float64)); err == nil && floatVal == 1 {
+			var result float64
+			fmt.Sscanf(value, "%f", &result)
+			return result
+		}
 	}
-	value, err := time.ParseDuration(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-	return value
+	return defaultValue
 }
 
 // DSN returns the database connection string
